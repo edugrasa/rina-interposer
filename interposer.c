@@ -9,6 +9,9 @@
 #include <errno.h>
 #include <dlfcn.h>
 #include <rina/api.h>
+#include <unistd.h> 
+#include <fcntl.h>
+#include <arpa/inet.h>
  
 int socket(int domain, int type, int protocol) {
   static int (*my_socket)(int, int, int) = NULL;
@@ -140,7 +143,7 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
       struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
       addr_in->sin_family = AF_INET;
       addr_in->sin_port = htons(1234);
-      inet_aton("127.0.0.1", &addr_in->sin_addr.s_addr);
+      inet_aton("127.0.0.1", &addr_in->sin_addr);
       *addrlen = sizeof(struct sockaddr_in);
     } else {
       if (verbose) perror("  rina_flow_accept");
