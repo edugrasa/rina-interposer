@@ -153,7 +153,7 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     if (my_accept == NULL) {
       my_accept = dlsym(RTLD_NEXT, "accept");
     }
-    int fd = my_accept(sockfd, addr, addrlen);
+    my_accept(sockfd, addr, addrlen);
   }
   if (verbose) printf("...returns %d\n", fd);
   return fd;
