@@ -40,6 +40,7 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     flow_spec.in_order_delivery = 1;
     flow_spec.msg_boundaries = 0;
     flow_spec.max_loss = 0;
+    flow_spec.version = 1;
     int rina_fd = rina_flow_alloc(dif,
                                   local_appl,
                                   remote_appl,
@@ -60,7 +61,7 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     }
     rc = my_connect(sockfd, addr, addrlen);
   }
-  if (verbose) printf("...returns -1\n");
+  if (verbose) printf("...returns %d\n", rc);
   return rc;
 }
 
