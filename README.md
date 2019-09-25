@@ -4,6 +4,8 @@ Prototype adaptor from BSD Sockets/POSIX API calls to RINA
 
 To build:
 
+    cd build
+    cmake ..
     make
 
 On server, run:
