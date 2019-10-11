@@ -12,6 +12,8 @@
 #include <unistd.h> 
 #include <fcntl.h>
 #include <arpa/inet.h>
+#include <pthread.h>
+#include "rina-sockets-internal.h"
  
 int socket(int domain, int type, int protocol) {
 	static int (*my_socket)(int, int, int) = NULL;
@@ -245,3 +247,51 @@ int setsockopt(int sockfd, int level, int optname,
 
 	return 0;
 }
+
+ssize_t recv(int sockfd, void *buf, size_t len, int flags) {
+	char* verbose = getenv("RINA_VERBOSE");
+
+	if (verbose) printf("recv(%d, %p, %d, %d)...\n", sockfd, buf, len, flags);
+
+	return 0;
+}
+
+ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags,
+		                        struct sockaddr *src_addr, socklen_t *addrlen) {
+	char* verbose = getenv("RINA_VERBOSE");
+
+	if (verbose) printf("recvfrom(%d, %p, %d, %p, %p)...\n", sockfd,
+				buf, len, flags, src_addr, addrlen);
+
+	return 0;
+}
+
+ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags) {
+	char* verbose = getenv("RINA_VERBOSE");
+
+	if (verbose) printf("recvmsg(%d, %p, %d), ...\n", sockfd, 
+			msg, flags);
+
+	return 0;
+}
+
+ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
+	char* verbose = getenv("RINA_VERBOSE");
+
+	if (verbose) printf("send(%d, %p, %d, %d),...\n", sockfd, buf,
+				len, flags);
+
+	return 0;
+}
+
+ssize_t sendto(int sockfd, const void *buf, size_t len, int flags,
+	       const struct sockaddr *dest_addr, socklen_t addrlen){
+	char* verbose = getenv("RINA_VERBOSE");
+
+	if (verbose) printf("sendto(%d, %p, %d, %d, %p, %d),...\n", sockfd, 
+				buf, len, flags, dest_addr, addrlen);
+
+	return 0;
+}
+
+
