@@ -34,6 +34,7 @@ struct faux_socket {
 
 int open_faux_socket(int domain, int type, int protocol, struct faux_socket * fs);
 int get_faux_socket(int sockfd, struct faux_socket * fs);
+int populate_rina_fspec(struct faux_socket * fs, struct rina_flow_spec * fspec);
 int close_faux_socket(int sockfd);
 
 #endif /* RINA_FAUX_SOCKETS_INTERNAL_H */

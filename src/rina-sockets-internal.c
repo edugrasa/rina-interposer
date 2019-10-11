@@ -85,20 +85,10 @@ int open_faux_socket(int domain, int type, int protocol, struct faux_socket * fs
 	fs->type = type;
 	fs->protocol = protocol;
 	
-	/* TODO Initialize RINA Flow spec based on socket type */
-	switch(type) {
-		case SOCK_STREAM:
-			break;
-		case SOCK_DGRAM:
-			break;
-		case SOCK_SEQPACKET:
-			break;
-		case SOCK_RDM:
-			break;
-		case SOCK_RAW: /* Not supported */
-		default:
-			errno = EINVAL;
-			return -1;
+	if (type == SOCK_RAW) {
+		/* TODO log error */
+		errno = EINVAL;
+		return -1;
 	}
 
 	pthread_mutex_lock(&fss->mutex);
@@ -148,6 +138,44 @@ int get_faux_socket(int sockfd, struct faux_socket * fs) {
 	pthread_mutex_unlock(&fss->mutex);
 
 	return ret;
+}
+
+int populate_rina_fspec(struct faux_socket * fs, 
+			struct rina_flow_spec * fspec) {
+	fspec->version = 1;
+
+	switch(fs->type) {
+		case SOCK_STREAM:
+			fs->flow_spec.max_sdu_gap = 0;
+			fs->flow_spec.max_loss = 0;
+			fs->flow_spec.in_order_delivery = 1;
+			fs->flow_spec.msg_boundaries = 0;
+			break;
+		case SOCK_DGRAM:
+			fs->flow_spec.max_sdu_gap = 10000;
+			fs->flow_spec.max_loss = 10000;
+			fs->flow_spec.in_order_delivery = 0;
+			fs->flow_spec.msg_boundaries = 1;
+			break;
+		case SOCK_SEQPACKET:
+			fs->flow_spec.max_sdu_gap = 0;
+			fs->flow_spec.max_loss = 0;
+			fs->flow_spec.in_order_delivery = 1;
+			fs->flow_spec.msg_boundaries = 1;
+			break;
+		case SOCK_RDM:
+			fs->flow_spec.max_sdu_gap = 0;
+			fs->flow_spec.max_loss = 0;
+			fs->flow_spec.in_order_delivery = 0;
+			fs->flow_spec.msg_boundaries = 1;
+			break;
+		default:
+			/* Not supported type */
+			errno = EINVAL;
+			return -1;
+	}
+
+	return 0;
 }
 
 int close_faux_socket(int sockfd) {
