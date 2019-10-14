@@ -28,7 +28,6 @@ KHASH_MAP_INIT_INT(fauxs, struct faux_socket *)
 struct faux_sockets_store {
 	pthread_mutex_t mutex;
 	khash_t(fauxs) * ht; /* Hash table to store faux sockets */
-	int last_sockfd;
 };
 
 struct faux_sockets_store * fs_store = NULL;
@@ -54,13 +53,27 @@ struct faux_sockets_store * get_fs_store() {
 		/* TODO log error */
 	}
 
-	/* Initialize Last sock fd */
-	fs_store->last_sockfd = 0;
-
 	return fs_store;
 }
 
-int open_faux_socket(int domain, int type, int protocol, struct faux_socket * fs) {
+int is_socket_supported(int domain, int type, int protocol) {
+	if (domain != AF_INET && domain != AF_INET6) {
+		/* TODO log error */
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (type == SOCK_RAW) {
+		/* TODO log error */
+		errno = EINVAL;
+		return -1;
+	}
+
+	return 0;
+}
+
+int open_faux_socket(int domain, int type, int protocol, int sockfd, 
+		     struct faux_socket ** fs) {
 	struct faux_sockets_store * fss;
 	khint_t k;
 	int ret;
@@ -72,45 +85,35 @@ int open_faux_socket(int domain, int type, int protocol, struct faux_socket * fs
 		return -1;
 	}
 
-	/* TODO Check for supported socket families */
-
-	fs = calloc(1, sizeof(struct faux_socket));
-	if (!fs) {
+	*fs = calloc(1, sizeof(struct faux_socket));
+	if (!*fs) {
 		/* TODO log error */
 		errno = ENOMEM;
 		return -1;
 	}
 
-	fs->domain = domain;
-	fs->type = type;
-	fs->protocol = protocol;
+	(*fs)->domain = domain;
+	(*fs)->type = type;
+	(*fs)->protocol = protocol;
 	
-	if (type == SOCK_RAW) {
-		/* TODO log error */
-		errno = EINVAL;
-		return -1;
-	}
-
 	pthread_mutex_lock(&fss->mutex);
 
-	fss->last_sockfd++;
-	fs->sockfd = fss->last_sockfd;
-	fs->rinafd = 0;
+	(*fs)->sockfd = sockfd;
 	
 	/* Insert faux socket into hash table */
-	k = kh_put(fauxs, fss->ht, fs->sockfd, &ret);
+	k = kh_put(fauxs, fss->ht, (*fs)->sockfd, &ret);
 	if (!ret) {
 		/* TODO log error */
-		kh_del(fauxs, fss->ht, fs->sockfd);
+		kh_del(fauxs, fss->ht, (*fs)->sockfd);
 	}
-	kh_value(fss->ht, k) = fs;
+	kh_value(fss->ht, k) = *fs;
 
 	pthread_mutex_unlock(&fss->mutex);
 
-	return fs->sockfd;
+	return 0;
 }
 
-int get_faux_socket(int sockfd, struct faux_socket * fs) {
+int get_faux_socket(int sockfd, struct faux_socket ** fs) {
 	struct faux_sockets_store * fss;
 	khint_t k;
 	int ret;
@@ -131,7 +134,7 @@ int get_faux_socket(int sockfd, struct faux_socket * fs) {
 		errno = EINVAL;
 		ret = -1;
 	} else {
-		fs = kh_value(fss->ht, k);
+		*fs = kh_value(fss->ht, k);
 		ret = 0;
 	}
 
@@ -146,28 +149,28 @@ int populate_rina_fspec(struct faux_socket * fs,
 
 	switch(fs->type) {
 		case SOCK_STREAM:
-			fs->flow_spec.max_sdu_gap = 0;
-			fs->flow_spec.max_loss = 0;
-			fs->flow_spec.in_order_delivery = 1;
-			fs->flow_spec.msg_boundaries = 0;
+			fspec->max_sdu_gap = 0;
+			fspec->max_loss = 0;
+			fspec->in_order_delivery = 1;
+			fspec->msg_boundaries = 0;
 			break;
 		case SOCK_DGRAM:
-			fs->flow_spec.max_sdu_gap = 10000;
-			fs->flow_spec.max_loss = 10000;
-			fs->flow_spec.in_order_delivery = 0;
-			fs->flow_spec.msg_boundaries = 1;
+			fspec->max_sdu_gap = 10000;
+			fspec->max_loss = 10000;
+			fspec->in_order_delivery = 0;
+			fspec->msg_boundaries = 1;
 			break;
 		case SOCK_SEQPACKET:
-			fs->flow_spec.max_sdu_gap = 0;
-			fs->flow_spec.max_loss = 0;
-			fs->flow_spec.in_order_delivery = 1;
-			fs->flow_spec.msg_boundaries = 1;
+			fspec->max_sdu_gap = 0;
+			fspec->max_loss = 0;
+			fspec->in_order_delivery = 1;
+			fspec->msg_boundaries = 1;
 			break;
 		case SOCK_RDM:
-			fs->flow_spec.max_sdu_gap = 0;
-			fs->flow_spec.max_loss = 0;
-			fs->flow_spec.in_order_delivery = 0;
-			fs->flow_spec.msg_boundaries = 1;
+			fspec->max_sdu_gap = 0;
+			fspec->max_loss = 0;
+			fspec->in_order_delivery = 0;
+			fspec->msg_boundaries = 1;
 			break;
 		default:
 			/* Not supported type */
