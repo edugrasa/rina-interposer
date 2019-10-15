@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <sys/uio.h>
 #include "rina-sockets-internal.h"
  
 int socket(int domain, int type, int protocol) {
@@ -272,15 +273,32 @@ int getaddrinfo(const char *node, const char *service,
 		inet_aton(service, &addr_in->sin_addr);
 	}
   
-	if (verbose) printf("...returns 0");
+	if (verbose) printf("...returns 0\n");
   	
 	return 0;
 }
 
 int getsockname(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 	char * verbose = getenv("RINA_VERBOSE");
+	struct sockaddr_in * addr_in = NULL;
 
-	if (verbose) printf("getsockname(%d, %p, %p)...\n", sockfd, addr, addrlen);
+	if (verbose) printf("getsockname(%d, %p, %p)...\n", sockfd, 
+			    addr, addrlen);
+
+	if (!*addrlen) {
+		errno = EINVAL;
+		perror("   Address lenght is null");
+		return -1;
+	}
+
+	if (*addrlen < sizeof(struct sockaddr_in)) {
+		if (verbose) printf("Warning, address length too small\n");
+	}
+
+	addr_in = (struct sockaddr_in *)addr;
+	addr_in->sin_family = AF_INET;
+
+	if (verbose) printf("...returns 0\n");
 
 	return 0;
 }
@@ -290,6 +308,8 @@ int getpeername(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 
 	if (verbose) printf("getpeername(%d, %p, %p)...\n", sockfd, addr, addrlen);
 
+	if (verbose) printf("...return 0\n");
+
 	return 0;
 }
 
@@ -298,6 +318,8 @@ int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optl
 
 	if (verbose) printf("getsockopt(%d, %d, %d, %p, %p)...\n", sockfd,
 			     level, optname, optval, optlen);
+
+	if (verbose) printf("...returns 0\n");
 
 	return 0;
 }
@@ -309,90 +331,113 @@ int setsockopt(int sockfd, int level, int optname,
 	if (verbose) printf("setsockopt(%d, %d, %d, %p, %d)...\n", sockfd,
 			     level, optname, optval, optlen);
 
+	if (verbose) printf("...returns 0\n");
+
 	return 0;
 }
 
 ssize_t recv(int sockfd, void *buf, size_t len, int flags) {
 	char * verbose = getenv("RINA_VERBOSE");
+	int rv = 0;
 
 	if (verbose) printf("recv(%d, %p, %d, %d)...\n", 
 			    sockfd, buf, len, flags);
 
 	/* Ignore flags for now*/
-	return read(sockfd, buf, len);
+	rv = read(sockfd, buf, len);
+
+	if (verbose) printf("...returns %d\n", rv);
+
+	return rv;
 }
 
 ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags,
 		 struct sockaddr *src_addr, socklen_t *addrlen) {
 	char * verbose = getenv("RINA_VERBOSE");
+	int rv = 0;
 
 	if (verbose) printf("recvfrom(%d, %p, %d, %p, %p)...\n", sockfd,
 				buf, len, flags, src_addr, addrlen);
 
 	/* Ignore flags and address for now */
-	return read (sockfd, buf, len);
+	rv = read(sockfd, buf, len);
+
+	if (verbose) printf("...returns %d\n", rv);
+
+	return rv;
 }
 
 ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags) {
 	char * verbose = getenv("RINA_VERBOSE");
+	int rv = 0;
 
 	if (verbose) printf("recvmsg(%d, %p, %d), ...\n", sockfd, 
 			msg, flags);
 
-	/* S/G I/O not supported for now */
-	if (msg->msg_iovlen != 1) {
-		errno = EINVAL;
-		perror ("... S/G I/O not supported yet\n");
-		return -1;
-	}
+	/* Ignore flags for now */	
+	rv = readv(sockfd, msg->msg_iov, msg->msg_iovlen);
 
-	return read(sockfd, msg->msg_iov[0].iov_base, 
-		    msg->msg_iov[0].iov_len);
+	if (verbose) printf("...returns %d\n", rv);
+
+	return rv;
 }
 
 ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
 	char * verbose = getenv("RINA_VERBOSE");
+	int rv = 0;
 
 	if (verbose) printf("send(%d, %p, %d, %d),...\n", sockfd, buf,
 				len, flags);
 
 	/* Ignore flags for now */
-	return write(sockfd, buf, len);
+	rv = write(sockfd, buf, len);
+
+	if (verbose) printf("...returns %d\n", rv);
+
+	return rv;
 }
 
 ssize_t sendto(int sockfd, const void *buf, size_t len, int flags,
 	       const struct sockaddr *dest_addr, socklen_t addrlen){
 	char * verbose = getenv("RINA_VERBOSE");
+	int rv = 0;
 
 	if (verbose) printf("sendto(%d, %p, %d, %d, %p, %d),...\n", sockfd, 
 				buf, len, flags, dest_addr, addrlen);
 
 	/* Ignore flags and address for now */
-	return write(sockfd, buf, len);
+	rv = write(sockfd, buf, len);
+
+	if (verbose) printf("...returns %d\n", rv);
+
+	return rv;
 }
 
 ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags) {
 	char * verbose = getenv("RINA_VERBOSE");
+	int rv = 0;
 
 	if (verbose) printf("sendmsg(%d, %p, %d), ...\n", sockfd,
 			    msg, flags);
 
-	/* S/G I/O not supported for now */
-	if (msg->msg_iovlen != 1) {
-		errno = EINVAL;
-		perror("... S/G I/O not supported yet\n");
-		return -1;
-	}
+	/* Ignore flags for now */
+	rv = writev(sockfd, msg->msg_iov, msg->msg_iovlen);
 
-	return write(sockfd, msg->msg_iov[0].iov_base, 
-		     msg->msg_iov[0].iov_len);
+	if (verbose) printf("...returns %d\n", rv);
+
+	return rv;
 }
 
 int shutdown(int sockfd, int how) {
 	char * verbose = getenv("RINA_VERBOSE");
+	int rv = 0;
 
 	if (verbose) printf("shutdown(%d, %d), ...\n", sockfd, how);
 
 	/* Ignore how for now */
-	return close(sockfd);
+	rv = close(sockfd);
+
+	if (verbose) printf("...returns %d\n", rv);
+
+	return rv;
 }
