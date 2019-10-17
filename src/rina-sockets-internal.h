@@ -53,6 +53,10 @@ int bind_faux_socket(int sockfd, const struct sockaddr* addr,
 int get_app_name_from_addr(int sockfd, const struct sockaddr* addr,
 			   socklen_t addrlen, char * app_name);
 
+/* Set the socket peer */
+int set_faux_socket_peer(int sockfd, const struct sockaddr * addr,
+			 socklen_t addrlen);
+
 /* Populates a RINA flow spec based on the socket type */
 int populate_rina_fspec(int sockfd, struct rina_flow_spec * fspec);
 

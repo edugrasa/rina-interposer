@@ -112,6 +112,7 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 		if (verbose) printf("  RINA FD = %d - swapping for %d\n", rina_fd, sockfd);
 		rc = (dup2(rina_fd, sockfd) > 0) ? 0 : -1;
       		close(rina_fd);
+		set_faux_socket_peer(sockfd, addr, addrlen);
 	} else {
 		if (verbose) perror("  rina_flow_alloc");
 		rc = -1;

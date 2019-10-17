@@ -213,6 +213,14 @@ void app_name_from_sockaddr_in6(const struct sockaddr_in6 * in_addr,
 	strcat(app_name, "|");
 }
 
+void init_ipv4_addr(struct sockaddr_in * to, struct sockaddr_in * from) {
+	memset(to, 0, sizeof(struct sockaddr_in));
+
+	to->sin_family = from->sin_family;
+	to->sin_port = from->sin_port;
+	to->sin_addr.s_addr = from->sin_addr.s_addr;
+}
+
 int bind_to_ipv4_address(struct faux_socket * fs, const struct sockaddr * addr,
 			 socklen_t addrlen) {
 	struct sockaddr_in * in_addr;
@@ -235,11 +243,7 @@ int bind_to_ipv4_address(struct faux_socket * fs, const struct sockaddr * addr,
 
 	in_fs_addr = (struct sockaddr_in *)fs->bind_addr;
 
-	memset(in_fs_addr, 0, sizeof(struct sockaddr_in));
-
-	in_fs_addr->sin_family = in_addr->sin_family;
-	in_fs_addr->sin_port = in_addr->sin_port;
-	in_fs_addr->sin_addr.s_addr = in_addr->sin_addr.s_addr;
+	init_ipv4_addr(in_fs_addr, in_addr);
 
 	fs->bind_addrlen = addrlen;
 	
@@ -247,6 +251,16 @@ int bind_to_ipv4_address(struct faux_socket * fs, const struct sockaddr * addr,
 	app_name_from_sockaddr_in(in_fs_addr, fs->bind_app_name);
 
 	return 0;
+}
+
+void init_ipv6_addr(struct sockaddr_in6 * to, struct sockaddr_in6 * from){
+	memset(to, 0, sizeof(struct sockaddr_in6));
+
+	to->sin6_family = from->sin6_family;
+	to->sin6_port = from->sin6_port;
+	to->sin6_flowinfo = from->sin6_flowinfo;
+	to->sin6_scope_id = from->sin6_scope_id;
+	memcpy(to->sin6_addr.s6_addr, from->sin6_addr.s6_addr, 16);
 }
 
 int bind_to_ipv6_address(struct faux_socket * fs, const struct sockaddr * addr,
@@ -271,13 +285,7 @@ int bind_to_ipv6_address(struct faux_socket * fs, const struct sockaddr * addr,
 
 	in_fs_addr = (struct sockaddr_in6 *)fs->bind_addr;
 
-	memset(in_fs_addr, 0, sizeof(struct sockaddr_in6));
-
-	in_fs_addr->sin6_family = in_addr->sin6_family;
-	in_fs_addr->sin6_port = in_addr->sin6_port;
-	in_fs_addr->sin6_flowinfo = in_addr->sin6_flowinfo;
-	in_fs_addr->sin6_scope_id = in_addr->sin6_scope_id;
-	memcpy(in_fs_addr->sin6_addr.s6_addr, in_addr->sin6_addr.s6_addr, 16);
+	init_ipv6_addr(in_fs_addr, in_addr);
 
 	fs->bind_addrlen = addrlen;
 
@@ -382,6 +390,106 @@ int get_app_name_from_addr(int sockfd, const struct sockaddr* addr,
 			case AF_INET6:
 				ret = get_app_name_from_ipv6_addr(addr, addrlen,
 								  app_name);
+				break;
+			default:
+				/* TODO log error */
+				errno = EINVAL;
+				ret = -1;
+		}
+	}
+
+	pthread_mutex_unlock(&fss->mutex);
+
+	return ret;
+}
+
+int set_socket_peerv4(struct faux_socket * fs, const struct sockaddr * addr, 
+		      socklen_t addrlen) {
+	struct sockaddr_in * in_addr;
+	struct sockaddr_in * in_fs_addr;
+
+	if (addrlen != sizeof(struct sockaddr_in)) {
+		/* TODO log error */
+		errno = ENOMEM;
+		return -1;
+	}
+
+	in_addr = (struct sockaddr_in *)addr;
+
+	fs->peer_addr = calloc(1, sizeof(struct sockaddr_in));
+	if (!fs->peer_addr) {
+		/* TODO log error */
+		errno = ENOMEM;
+		return -1;
+	}
+
+	in_fs_addr = (struct sockaddr_in *)fs->peer_addr;
+
+	init_ipv4_addr(in_fs_addr, in_addr);
+
+	fs->peer_addrlen = addrlen;
+									
+	/* Create peer application name */
+	app_name_from_sockaddr_in(in_fs_addr, fs->peer_app_name);
+
+	return 0;
+}
+
+int set_socket_peerv6(struct faux_socket * fs, const struct sockaddr * addr,
+		      socklen_t addrlen) {
+	struct sockaddr_in6 * in_addr;
+	struct sockaddr_in6 * in_fs_addr;
+
+	if (addrlen != sizeof (struct sockaddr_in6)) {
+		/* TODO log error */
+		errno = ENOMEM;
+		return -1;
+	}
+
+	in_addr = (struct sockaddr_in6 *)addr;
+
+	fs->peer_addr = calloc(1, sizeof(struct sockaddr_in6));
+	if (!fs->peer_addr) {
+		/* TODO log error */
+		errno = ENOMEM;
+		return -1;
+	}
+
+	in_fs_addr = (struct sockaddr_in6 *)fs->peer_addr;
+
+	init_ipv6_addr(in_fs_addr, in_addr);
+
+	fs->peer_addrlen = addrlen;
+
+	/* Create local application name */
+	app_name_from_sockaddr_in6(in_fs_addr, fs->peer_app_name);
+
+	return 0;
+}
+
+int set_faux_socket_peer(int sockfd, const struct sockaddr * addr,
+		   	 socklen_t addrlen) {
+	struct faux_sockets_store * fss;
+	struct faux_socket * fs;
+	int ret;
+
+	fss = get_fs_store();
+	if (!fss) {
+		/* TODO log error */
+		errno = ENOMEM;
+		return -1;
+	}
+
+	pthread_mutex_lock(&fss->mutex);
+
+	ret = _get_faux_socket(sockfd, &fs, fss);
+	if (ret == 0) {
+		switch (fs->domain) {
+			case AF_INET:
+				ret = set_socket_peerv4(fs, addr, addrlen);
+				break;
+			case AF_INET6:
+				ret = set_socket_peerv6(fs, addr, addrlen);
 				break;
 			default:
 				/* TODO log error */
