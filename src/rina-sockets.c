@@ -18,7 +18,6 @@
 #include "rina-sockets-internal.h"
  
 int socket(int domain, int type, int protocol) {
-	struct faux_socket * fs = NULL;
 	static int (*my_socket)(int, int, int) = NULL;
 	int fd = 0;
 	int ret = 0;
@@ -41,14 +40,14 @@ int socket(int domain, int type, int protocol) {
 		fd = my_socket(domain, type, protocol);
 
 		/* Open faux socket, to store socket state */
-		ret = open_faux_socket(domain, type, protocol, fd, &fs);
+		ret = open_faux_socket(domain, type, protocol, fd);
 		if (ret != 0) {
 			close(fd);
 			fd = ret;
 		}
 	}
 
-	if (verbose) printf("...returns %d\n", fd);
+	if (verbose) printf("...socket returns %d\n", fd);
 	
 	return fd;	
 }
@@ -56,121 +55,140 @@ int socket(int domain, int type, int protocol) {
 int close(int fd) {
 	static int (*my_close)(int) = NULL;
 	char * verbose = getenv("RINA_VERBOSE");
+	int rc = 0;
 
 	if (verbose) printf("close(%d)...\n", fd);
-	close_faux_socket(fd);
+	rc = close_faux_socket(fd);
 	
 	my_close = dlsym(RTLD_NEXT, "close");
 
-	return my_close(fd);
+	rc = my_close(fd);
+
+	if (verbose) printf("...close returns %d\n", rc);
+
+	return rc;
 }
 
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
-	struct faux_socket * fs = NULL;
 	struct rina_flow_spec flow_spec;
 	char * dif = getenv("RINA_DIF");
 	char * local_appl = getenv("RINA_LOCAL_APPL");
-	char * remote_appl = getenv("RINA_REMOTE_APPL");
 	char * verbose = getenv("RINA_VERBOSE");
+	char buffer[100];
 	int rc, rina_fd = 0;
 
-	if (verbose) printf("connect(%d, %p, %d)...\n", sockfd, addr, addrlen);
+	if (verbose) printf("connect(%d, %p, %d)...\n", 
+			    sockfd, addr, addrlen);
 	
-	if ((local_appl == NULL) || (remote_appl == NULL)) {
+	if (!local_appl || !addr) {
 		errno = EADDRNOTAVAIL;
 		if (verbose) 
-			perror("   Local appl name or Remote appl name are NULL\n");
+			perror("   Local appl name or dest @ are NULL\n");
 	       	return -1;
 	}
 
-	if (verbose) printf("  RINA_DIF=%s, RINA_LOCAL_APPL=%s, RINA_REMOTE_APPL=%s => RINA interposer enabled!\n", 
-			    dif, local_appl, remote_appl);
-	if (verbose) printf("  rina_flow_alloc(\"%s\", \"%s\", \"%s\", NULL, 0)...\n", 
-			    dif, local_appl, remote_appl);
-	
-	if (get_faux_socket(sockfd, &fs) != 0) {
+	if (get_app_name_from_addr(sockfd, addr, addrlen, buffer)) {
+		errno = EINVAL;
+		if (verbose)
+			perror("  Problems obtaining dest app name from @");
+		return -1;
+	}
+
+	if (populate_rina_fspec(sockfd, &flow_spec)) {
 		errno = EINVAL;
 		if (verbose)
 			perror("   Cannot find faux sockets with requested sockfd \n");
 		return -1;
 	}
-	
-	populate_rina_fspec(fs, &flow_spec);
 
-	rina_fd = rina_flow_alloc(dif, local_appl, remote_appl, &flow_spec, 0);
+	if (verbose) printf("  rina_fow_aloc(\"%s\", \"%s\", \"%s\", %p, 0)...\n",
+			    dif, local_appl, buffer, &flow_spec);
+	
+	rina_fd = rina_flow_alloc(dif, local_appl, buffer, &flow_spec, 0);
 		
-	if (verbose) printf("  ...returns %d\n", rina_fd);
+	if (verbose) printf("  ...rina_flow_alloc returns %d\n", rina_fd);
     	
 	if (rina_fd >= 0) {
 		if (verbose) printf("  RINA FD = %d - swapping for %d\n", rina_fd, sockfd);
 		rc = (dup2(rina_fd, sockfd) > 0) ? 0 : -1;
-      		/*close(rina_fd);*/
+      		close(rina_fd);
 	} else {
 		if (verbose) perror("  rina_flow_alloc");
 		rc = -1;
 	}
 	
-	if (verbose) printf("...returns %d\n", rc);
+	if (verbose) printf("... connect returns %d\n", rc);
 	
 	return rc;
 }
 
 int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
-  	char * dif = getenv("RINA_DIF");
-	char * local_appl = getenv("RINA_LOCAL_APPL");
 	char * verbose = getenv("RINA_VERBOSE");
+	struct faux_socket fs;
 	int rc = 0;
   
 	if (verbose) printf("bind(%d, %p, %d)...\n", sockfd, addr, addrlen);
   	
- 	if ((dif == NULL) || (local_appl == NULL)) {
-		errno = EADDRNOTAVAIL;
-		if (verbose)
-			perror("   Local appl name or DIF name are NULL\n");
-		return -1;
+	rc = bind_faux_socket(sockfd, addr, addrlen);
+
+	if (verbose && rc == 0) {
+		get_faux_socket_data(sockfd, &fs);
+		printf("  Bound to application name %s\n", 
+			fs.bind_app_name);
 	}
 
-	if (verbose) {
-		printf("  RINA_DIF=%s, RINA_LOCAL_APPL=%s => RINA interposer enabled!\n", dif, local_appl);
-		printf("...returns %d\n", rc);
-	}
+	if (verbose) printf("..bind returns %d\n", rc);
   	
 	return rc;
 }
 
 int listen(int sockfd, int backlog) {
 	char * dif = getenv("RINA_DIF");
-	char * local_appl = getenv("RINA_LOCAL_APPL");
 	char * verbose = getenv("RINA_VERBOSE");
 	int rc = 0;
 	int rina_fd = 0;
+	struct faux_socket fs;
 	
 	if (verbose) printf("listen(%d, %d)...\n", sockfd, backlog);
 
-	if ((dif == NULL) || (local_appl == NULL)) {
+	if ((dif == NULL) ) {
 		errno = EADDRNOTAVAIL;
 		if (verbose)
 			perror("   Local appl name or DIF name are NULL\n");
 		return -1;
-	}	
-		
+	}
+
+	/* Check if socket can be listened */
+	if (get_faux_socket_data(sockfd, &fs)) {
+		errno = EBADF;
+		if (verbose) perror("   Unknown socket\n");
+		return -1;
+	}
+
+	if ((fs.type != SOCK_STREAM) && (fs.type != SOCK_SEQPACKET)) {
+		errno = EOPNOTSUPP;
+		if (verbose) perror("   Listen operation not supported\n");
+		return -1;
+	}
+	
 	if (verbose) {
-		printf("  RINA_DIF=%s, RINA_LOCAL_APPL=%s => RINA interposer enabled!\n", dif, local_appl);
 		printf("  rina_open()...\n");
 	}
 		
 	rina_fd = rina_open();
 		
-	if (verbose) printf("  ...returns %d\n", rina_fd);
+	if (verbose) printf("  ...rina_open returns %d\n", rina_fd);
 	if (rina_fd >= 0) {
-		if (verbose) printf("  rina_register(%d, \"%s\", \"%s\")...\n", rina_fd, dif, local_appl);
-		rc = rina_register(rina_fd, dif, local_appl, 0);
+		if (verbose) printf("  rina_register(%d, \"%s\", \"%s\")...\n", 
+				    rina_fd, dif, fs.bind_app_name);
+		rc = rina_register(rina_fd, dif, fs.bind_app_name, 0);
 
-		if (verbose) printf("  ...returns %d\n", rc);
+		if (verbose) printf("  ...rina_register returns %d\n", rc);
 		if (rc >= 0) {
-			if (verbose) printf("  RINA FD = %d - swapping for %d\n", rina_fd, sockfd);
-        		rc = (dup2(rina_fd, sockfd) > 0) ? 0 : -1;
-        		/*close(rina_fd);*/
+			if (verbose) printf("  RINA FD = %d - swapping for %d\n", 
+					    rina_fd, sockfd);
+			rc = (dup2(rina_fd, sockfd) > 0) ? 0 : -1;
+			close(rina_fd);
       		} else {
 			if (verbose) perror("  rina_register");
 		}
@@ -179,64 +197,80 @@ int listen(int sockfd, int backlog) {
 		rc = -1;
 	}
 	
-	if (verbose) printf("...returns %d\n", rc);
+	if (verbose) printf("...listen returns %d\n", rc);
 	
 	return rc;
 }
 
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 	char * dif = getenv("RINA_DIF");
-	char * local_appl = getenv("RINA_LOCAL_APPL");
 	char * verbose = getenv("RINA_VERBOSE");
 	int fd = 0;
 	int rc = 0;
 
 	if (verbose) printf("accept(%d, %p, %p)...\n", sockfd, addr, addrlen);
 	
-	if ((dif == NULL) || (local_appl == NULL)) {
+	if ((dif == NULL)) {
 		errno = EADDRNOTAVAIL;
 		if (verbose)
-			perror("   Local appl name or DIF name are NULL\n");
+			perror("   DIF name is NULL");
 		return -1;
 	}
 
-	if (verbose) printf("  RINA_DIF=%s, RINA_LOCAL_APPL=%s => RINA interposer enabled!\n", dif, local_appl);
-    		
 	fd_set read_fds;
 	FD_ZERO(&read_fds);
 	FD_SET(sockfd, &read_fds);
-    
-	if (verbose) printf("  select(%d, %p, NULL, NULL, NULL)...\n", sockfd + 1, &read_fds);
-    
+		    
+	if (verbose) printf("  select(%d, %p, NULL, NULL, NULL)...\n", 
+			    sockfd + 1, &read_fds);
+			    
 	rc = select(sockfd + 1, &read_fds, NULL, NULL, NULL);
-    
-	if (verbose) printf("  returns %d\n", rc);
-    	if (verbose) printf("  rina_flow_accept(%d, NULL, NULL, 0)...\n", sockfd);
+				    
+	if (verbose) printf("  ...select returns %d\n", rc);
+    	if (verbose) printf("  rina_flow_accept(%d, NULL, NULL, 0)...\n", 
+			    sockfd);
     
 	fd = rina_flow_accept(sockfd, NULL, NULL, 0);
     
-	if (verbose) printf("  ...returns %d\n", fd);
+	if (verbose) printf("  ...rina_flow_accept returns %d\n", fd);
 
 	if (fd >= 0) {
       		struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
-      		addr_in->sin_family = AF_INET;
+      		addr_in->sin_family = AF_INET6;
       		addr_in->sin_port = htons(1234);
-      		inet_aton("127.0.0.1", &addr_in->sin_addr);
+      		inet_aton("::1", &addr_in->sin_addr);
       		*addrlen = sizeof(struct sockaddr_in);
 	} else {
       		if (verbose) perror("  rina_flow_accept");
     	}
   
-	if (verbose) printf("...returns %d\n", fd);
+	if (verbose) printf("...accept returns %d\n", fd);
   	
 	return fd;
 }
 
+int accept4(int sockfd, struct sockaddr *addr, 
+	    socklen_t *addrlen, int flags) {
+	char * verbose = getenv("RINA_VERBOSE");
+	int rc;
+
+	if (verbose) printf("accept4(%d, %p, %p, %d)...\n", sockfd,
+			     addr, addrlen, flags);
+
+	/* Ignore flags for now */
+	rc = accept(sockfd, addr, addrlen);
+
+	if (verbose) printf("...accept4 returns %d\n", rc);
+}
+
+/*
 int getaddrinfo(const char *node, const char *service, 
 		const struct addrinfo *hints, struct addrinfo **res) {
   	char * verbose = getenv("RINA_VERBOSE");
 	int rc = 0;
 	struct sockaddr_in * addr_in = NULL;
+	int port = 0;
+	int ai_passive = 0;
 
 	if (verbose) printf("getaddrinfo(%s, %s, %p, %p)...\n", node, 
 			    service, hints, res);
@@ -256,6 +290,7 @@ int getaddrinfo(const char *node, const char *service,
 		(*res)->ai_flags = hints->ai_flags;
 		(*res)->ai_socktype = hints->ai_socktype;
 		(*res)->ai_protocol = hints->ai_protocol;
+		if (hints->ai_flags & AI_PASSIVE) ai_passive = 1;
 	}
 	
 	(*res)->ai_addr = calloc(1, sizeof(struct sockaddr_in));
@@ -266,60 +301,81 @@ int getaddrinfo(const char *node, const char *service,
 		return EAI_MEMORY;
 	}
 	
-	(*res)->ai_addrlen = sizeof(struct sockaddr_in);
+	/* Resolve to an IPv4 address */
+/*	(*res)->ai_addrlen = sizeof(struct sockaddr_in);
 	addr_in = (struct sockaddr_in *)(*res)->ai_addr;
 	addr_in->sin_family = AF_INET;
+
 	if (service) {
-		inet_aton(service, &addr_in->sin_addr);
+		port = atoi(service);
+		if (port > 0) { 
+			addr_in->sin_port = htons(port);
+		} else {
+			errno = EINVAL;
+			perror("   Problems converting service to int");
+			free(*res);
+			return EAI_SERVICE;
+		}
 	}
+
+	if (verbose) printf("   Resolved sin_port %d\n", addr_in->sin_port);
+
+	if (ai_passive && !node) {
+		addr_in->sin_addr.s_addr = htonl(INADDR_ANY);
+	} else if (!node) {
+		addr_in->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	} else {
+		inet_aton(node, &addr_in->sin_addr);
+	}
+
+	if (verbose) printf("   Resolved IPv4 address %d\n", 
+			    addr_in->sin_addr.s_addr);
   
-	if (verbose) printf("...returns 0\n");
+	if (verbose) printf("...getaddrinfo returns 0\n");
   	
 	return 0;
-}
+}*/
 
 int getsockname(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 	char * verbose = getenv("RINA_VERBOSE");
 	struct sockaddr_in * addr_in = NULL;
+	int rc;
 
 	if (verbose) printf("getsockname(%d, %p, %p)...\n", sockfd, 
 			    addr, addrlen);
 
-	if (!*addrlen) {
+	if (!addrlen || !addr) {
 		errno = EINVAL;
-		perror("   Address lenght is null");
+		perror("   Address or Address lenght are null");
 		return -1;
 	}
 
-	if (*addrlen < sizeof(struct sockaddr_in)) {
-		if (verbose) printf("Warning, address length too small\n");
-	}
+	rc = get_faux_sockname(sockfd, addr, addrlen);
+	
+	if (verbose) printf("...getsockname returns %d\n", rc);
 
-	addr_in = (struct sockaddr_in *)addr;
-	addr_in->sin_family = AF_INET;
-
-	if (verbose) printf("...returns 0\n");
-
-	return 0;
+	return rc;
 }
 
 int getpeername(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 	char * verbose = getenv("RINA_VERBOSE");
 
-	if (verbose) printf("getpeername(%d, %p, %p)...\n", sockfd, addr, addrlen);
+	if (verbose) printf("getpeername(%d, %p, %p)...\n", 
+			    sockfd, addr, addrlen);
 
-	if (verbose) printf("...return 0\n");
+	if (verbose) printf("...getpeername returns 0\n");
 
 	return 0;
 }
 
+/*
 int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen) {
 	char * verbose = getenv("RINA_VERBOSE");
 
 	if (verbose) printf("getsockopt(%d, %d, %d, %p, %p)...\n", sockfd,
 			     level, optname, optval, optlen);
 
-	if (verbose) printf("...returns 0\n");
+	if (verbose) printf("...getsockopt returns 0\n");
 
 	return 0;
 }
@@ -331,10 +387,10 @@ int setsockopt(int sockfd, int level, int optname,
 	if (verbose) printf("setsockopt(%d, %d, %d, %p, %d)...\n", sockfd,
 			     level, optname, optval, optlen);
 
-	if (verbose) printf("...returns 0\n");
+	if (verbose) printf("...setsockopt returns 0\n");
 
 	return 0;
-}
+}*/
 
 ssize_t recv(int sockfd, void *buf, size_t len, int flags) {
 	char * verbose = getenv("RINA_VERBOSE");
@@ -346,7 +402,7 @@ ssize_t recv(int sockfd, void *buf, size_t len, int flags) {
 	/* Ignore flags for now*/
 	rv = read(sockfd, buf, len);
 
-	if (verbose) printf("...returns %d\n", rv);
+	if (verbose) printf("...recv returns %d\n", rv);
 
 	return rv;
 }
@@ -362,7 +418,7 @@ ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags,
 	/* Ignore flags and address for now */
 	rv = read(sockfd, buf, len);
 
-	if (verbose) printf("...returns %d\n", rv);
+	if (verbose) printf("...recvfrom returns %d\n", rv);
 
 	return rv;
 }
@@ -377,7 +433,7 @@ ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags) {
 	/* Ignore flags for now */	
 	rv = readv(sockfd, msg->msg_iov, msg->msg_iovlen);
 
-	if (verbose) printf("...returns %d\n", rv);
+	if (verbose) printf("...recvmsg returns %d\n", rv);
 
 	return rv;
 }
@@ -392,7 +448,7 @@ ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
 	/* Ignore flags for now */
 	rv = write(sockfd, buf, len);
 
-	if (verbose) printf("...returns %d\n", rv);
+	if (verbose) printf("...send returns %d\n", rv);
 
 	return rv;
 }
@@ -408,7 +464,7 @@ ssize_t sendto(int sockfd, const void *buf, size_t len, int flags,
 	/* Ignore flags and address for now */
 	rv = write(sockfd, buf, len);
 
-	if (verbose) printf("...returns %d\n", rv);
+	if (verbose) printf("...sendto returns %d\n", rv);
 
 	return rv;
 }
@@ -423,7 +479,7 @@ ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags) {
 	/* Ignore flags for now */
 	rv = writev(sockfd, msg->msg_iov, msg->msg_iovlen);
 
-	if (verbose) printf("...returns %d\n", rv);
+	if (verbose) printf("...sendmsg returns %d\n", rv);
 
 	return rv;
 }
@@ -437,7 +493,7 @@ int shutdown(int sockfd, int how) {
 	/* Ignore how for now */
 	rv = close(sockfd);
 
-	if (verbose) printf("...returns %d\n", rv);
+	if (verbose) printf("...shutdown returns %d\n", rv);
 
 	return rv;
 }

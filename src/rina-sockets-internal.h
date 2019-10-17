@@ -28,6 +28,12 @@ struct faux_socket {
 	int type;
 	int protocol;
 	int sockfd;
+	struct sockaddr * bind_addr;
+	socklen_t bind_addrlen;
+	char bind_app_name[100];
+	struct sockaddr * peer_addr;
+	socklen_t peer_addrlen;
+	char peer_app_name[100];
 };
 
 /* Check if the socket domain, type and protocols are 
@@ -36,18 +42,36 @@ int is_socket_supported(int domain, int type, int protocol);
 
 /* Allocates a faux socket data structure and stores it in 
  * the faux sockets table */
-int open_faux_socket(int domain, int type, int protocol, 
-		     int sockfd, struct faux_socket ** fs);
+int open_faux_socket(int domain, int type, int protocol, int sockfd);
 
-/* Gets the faux socket structure associated to sockfd */
-int get_faux_socket(int sockfd, struct faux_socket ** fs);
+/* Binds the faux socket to the provided address. It will later
+ * be used to generate the local application name */
+int bind_faux_socket(int sockfd, const struct sockaddr* addr, 
+		     socklen_t addrlen);
+
+/* Construct an application name from a sockaddr data structure */
+int get_app_name_from_addr(int sockfd, const struct sockaddr* addr,
+			   socklen_t addrlen, char * app_name);
 
 /* Populates a RINA flow spec based on the socket type */
-int populate_rina_fspec(struct faux_socket * fs, 
-			struct rina_flow_spec * fspec);
+int populate_rina_fspec(int sockfd, struct rina_flow_spec * fspec);
+
+/* Copies the faux socket data to the provided data structure */
+int get_faux_socket_data(int sockfd, struct faux_socket * fs);
+
+/* Get the address to which this faux socket is bound to */
+int get_faux_sockname(int sockfd, struct sockaddr* addr, 
+		      socklen_t * addrlen);
 
 /* Removes the faux socket structure from the table and 
  * frees its memory */
 int close_faux_socket(int sockfd);
+
+/* Deallocates the memory allocated to the faux socket struct */
+int free_faux_socket(struct faux_socket * fs);
+
+/* ANSI C version of itoa, since it is not standard */
+
+void itoa(int value, char* str, int base);
 
 #endif /* RINA_FAUX_SOCKETS_INTERNAL_H */
