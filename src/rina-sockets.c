@@ -71,8 +71,10 @@ int close(int fd) {
 
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 	struct rina_flow_spec flow_spec;
+	struct faux_socket fs;
 	char * dif = getenv("RINA_DIF");
 	char * local_appl = getenv("RINA_LOCAL_APPL");
+	char * remote_appl = getenv("RINA_REMOTE_APPL");
 	char * verbose = getenv("RINA_VERBOSE");
 	char buffer[100];
 	int rc, rina_fd = 0;
@@ -80,18 +82,23 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 	if (verbose) printf("connect(%d, %p, %d)...\n", 
 			    sockfd, addr, addrlen);
 	
-	if (!local_appl || !addr) {
-		errno = EADDRNOTAVAIL;
+	if (!addr) {
+		errno = EINVAL;
 		if (verbose) 
-			perror("   Local appl name or dest @ are NULL\n");
+			perror("   Destination @ is NULL\n");
 	       	return -1;
 	}
 
-	if (get_app_name_from_addr(sockfd, addr, addrlen, buffer)) {
-		errno = EINVAL;
-		if (verbose)
-			perror("  Problems obtaining dest app name from @");
-		return -1;
+	/* If remote application is not set, use addr and addrlen) */
+	if (!remote_appl) {
+		if (get_app_name_from_addr(sockfd, addr, addrlen, buffer)) {
+			errno = EINVAL;
+			if (verbose)
+				perror("  Problems obtaining dest app name from @");
+			return -1;
+		}
+
+		remote_appl = buffer;
 	}
 
 	if (populate_rina_fspec(sockfd, &flow_spec)) {
@@ -101,10 +108,21 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 		return -1;
 	}
 
+	/* If RINA_LOCAL_APPL is not set, check if socket is bound */
+	if (!local_appl) {
+		if (get_faux_socket_data(sockfd, &fs)) {
+			errno = EBADF;
+			if (verbose) perror("   Unknown socket\n");
+			return -1;
+		}
+
+		if (fs.bind_addrlen > 0) local_appl = fs.bind_app_name;
+	}
+
 	if (verbose) printf("  rina_fow_aloc(\"%s\", \"%s\", \"%s\", %p, 0)...\n",
-			    dif, local_appl, buffer, &flow_spec);
+			    dif, local_appl, remote_appl, &flow_spec);
 	
-	rina_fd = rina_flow_alloc(dif, local_appl, buffer, &flow_spec, 0);
+	rina_fd = rina_flow_alloc(dif, local_appl, remote_appl, &flow_spec, 0);
 		
 	if (verbose) printf("  ...rina_flow_alloc returns %d\n", rina_fd);
     	
@@ -147,6 +165,7 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 int listen(int sockfd, int backlog) {
 	char * dif = getenv("RINA_DIF");
 	char * verbose = getenv("RINA_VERBOSE");
+	char * local_appl = getenv("RINA_LOCAL_APPL");
 	int rc = 0;
 	int rina_fd = 0;
 	struct faux_socket fs;
@@ -173,6 +192,9 @@ int listen(int sockfd, int backlog) {
 		return -1;
 	}
 	
+	/* If local appl is not set, use bind address */
+	if (!local_appl) local_appl = fs.bind_app_name;
+	
 	if (verbose) {
 		printf("  rina_open()...\n");
 	}
@@ -182,8 +204,8 @@ int listen(int sockfd, int backlog) {
 	if (verbose) printf("  ...rina_open returns %d\n", rina_fd);
 	if (rina_fd >= 0) {
 		if (verbose) printf("  rina_register(%d, \"%s\", \"%s\")...\n", 
-				    rina_fd, dif, fs.bind_app_name);
-		rc = rina_register(rina_fd, dif, fs.bind_app_name, 0);
+				    rina_fd, dif, local_appl);
+		rc = rina_register(rina_fd, dif, local_appl, 0);
 
 		if (verbose) printf("  ...rina_register returns %d\n", rc);
 		if (rc >= 0) {
