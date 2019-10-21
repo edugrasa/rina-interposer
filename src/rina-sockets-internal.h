@@ -23,6 +23,8 @@
 #include <rina/api.h>
 #include <sys/types.h>
 
+#define MAX_RINA_APP_NAME_SIZE 100
+
 struct faux_socket {
 	int domain;
 	int type;
@@ -30,10 +32,10 @@ struct faux_socket {
 	int sockfd;
 	struct sockaddr * bind_addr;
 	socklen_t bind_addrlen;
-	char bind_app_name[100];
+	char bind_app_name[MAX_RINA_APP_NAME_SIZE];
 	struct sockaddr * peer_addr;
 	socklen_t peer_addrlen;
-	char peer_app_name[100];
+	char peer_app_name[MAX_RINA_APP_NAME_SIZE];
 };
 
 /* Check if the socket domain, type and protocols are 
@@ -67,6 +69,10 @@ int get_faux_socket_data(int sockfd, struct faux_socket * fs);
 int get_faux_sockname(int sockfd, struct sockaddr* addr, 
 		      socklen_t * addrlen);
 
+/* Get the address of the peer to wich this fs is connected */
+int get_faux_peername(int sockfd, struct sockaddr* addr, 
+		      socklen_t * addrlen);
+
 /* Removes the faux socket structure from the table and 
  * frees its memory */
 int close_faux_socket(int sockfd);
@@ -74,8 +80,14 @@ int close_faux_socket(int sockfd);
 /* Deallocates the memory allocated to the faux socket struct */
 int free_faux_socket(struct faux_socket * fs);
 
-/* ANSI C version of itoa, since it is not standard */
+/* Store a faux socket sockopt */
+int store_faux_sockopt(int level, int optname, const void * optval, 
+		       socklen_t len);
 
+/* Retrieve the value of a faux socket sockopt */
+int get_faux_sockopt_value(int optname, socklen_t * len);
+
+/* ANSI C version of itoa, since it is not standard */
 void itoa(int value, char* str, int base);
 
 #endif /* RINA_FAUX_SOCKETS_INTERNAL_H */

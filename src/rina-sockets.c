@@ -109,7 +109,8 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 	if (verbose) printf("  ...rina_flow_alloc returns %d\n", rina_fd);
     	
 	if (rina_fd >= 0) {
-		if (verbose) printf("  RINA FD = %d - swapping for %d\n", rina_fd, sockfd);
+		if (verbose) printf("  RINA FD = %d - swapping for %d\n", 
+				    rina_fd, sockfd);
 		rc = (dup2(rina_fd, sockfd) > 0) ? 0 : -1;
       		close(rina_fd);
 		set_faux_socket_peer(sockfd, addr, addrlen);
@@ -206,8 +207,11 @@ int listen(int sockfd, int backlog) {
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 	char * dif = getenv("RINA_DIF");
 	char * verbose = getenv("RINA_VERBOSE");
-	int fd = 0;
+	struct faux_socket parent_fs;
+	int rina_fd = 0;
 	int rc = 0;
+	int new_sockfd = 0;
+	
 
 	if (verbose) printf("accept(%d, %p, %p)...\n", sockfd, addr, addrlen);
 	
@@ -231,23 +235,32 @@ int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
     	if (verbose) printf("  rina_flow_accept(%d, NULL, NULL, 0)...\n", 
 			    sockfd);
     
-	fd = rina_flow_accept(sockfd, NULL, NULL, 0);
+	rina_fd = rina_flow_accept(sockfd, NULL, NULL, 0);
     
-	if (verbose) printf("  ...rina_flow_accept returns %d\n", fd);
+	if (verbose) printf("  ...rina_flow_accept returns %d\n", rina_fd);
 
-	if (fd >= 0) {
-      		struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
-      		addr_in->sin_family = AF_INET6;
-      		addr_in->sin_port = htons(1234);
-      		inet_aton("::1", &addr_in->sin_addr);
-      		*addrlen = sizeof(struct sockaddr_in);
+	if (rina_fd >= 0) {
+		get_faux_socket_data(sockfd, &parent_fs);
+		new_sockfd = socket(parent_fs.domain, parent_fs.type, 
+				    parent_fs.protocol);
+		rc = (dup2(rina_fd, new_sockfd) > 0) ? new_sockfd : -1;
+		close(rina_fd);
+		bind(sockfd, parent_fs.bind_addr, parent_fs.bind_addrlen);
+
+
+      		struct sockaddr_in6 *addr_in = (struct sockaddr_in6 *)addr;
+      		addr_in->sin6_family = AF_INET6;
+      		addr_in->sin6_port = htons(50981);
+      		inet_pton(AF_INET6, "::1", &(addr_in->sin6_addr));
+      		*addrlen = sizeof(struct sockaddr_in6);
 	} else {
       		if (verbose) perror("  rina_flow_accept");
+		rc = -1;
     	}
   
-	if (verbose) printf("...accept returns %d\n", fd);
+	if (verbose) printf("...accept returns %d\n", rc);
   	
-	return fd;
+	return rc;
 }
 
 int accept4(int sockfd, struct sockaddr *addr, 
@@ -264,8 +277,8 @@ int accept4(int sockfd, struct sockaddr *addr,
 	if (verbose) printf("...accept4 returns %d\n", rc);
 }
 
-/*
-int getaddrinfo(const char *node, const char *service, 
+
+/*int getaddrinfo(const char *node, const char *service, 
 		const struct addrinfo *hints, struct addrinfo **res) {
   	char * verbose = getenv("RINA_VERBOSE");
 	int rc = 0;
@@ -360,21 +373,42 @@ int getsockname(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 
 int getpeername(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 	char * verbose = getenv("RINA_VERBOSE");
+	int rc;
 
 	if (verbose) printf("getpeername(%d, %p, %p)...\n", 
 			    sockfd, addr, addrlen);
 
-	if (verbose) printf("...getpeername returns 0\n");
+	if (!addrlen || !addr) {
+		errno = EINVAL;
+		perror("   Address or Address length are null");
+		return -1;
+	}
 
-	return 0;
+	rc = get_faux_peername(sockfd, addr, addrlen);
+
+	if (verbose) printf("...getpeername returns %d\n", rc);
+
+	return rc;
 }
 
-/*
-int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen) {
+int getsockopt(int sockfd, int level, int optname, 
+	       void *optval, socklen_t *optlen) {
 	char * verbose = getenv("RINA_VERBOSE");
+	int rc;
+	int * val;
 
 	if (verbose) printf("getsockopt(%d, %d, %d, %p, %p)...\n", sockfd,
 			     level, optname, optval, optlen);
+
+	if (!optval || !optlen) {
+		errno = EINVAL;
+		perror("   optcal or optlen are null");
+		return -1;
+	}
+
+	rc = get_faux_sockopt_value(optname, optlen); 
+	val = (int *) optval;
+	*val = rc;
 
 	if (verbose) printf("...getsockopt returns 0\n");
 
@@ -384,14 +418,17 @@ int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optl
 int setsockopt(int sockfd, int level, int optname,
 	       const void *optval, socklen_t optlen) {
 	char * verbose = getenv("RINA_VERBOSE");
+	int rc;
 
 	if (verbose) printf("setsockopt(%d, %d, %d, %p, %d)...\n", sockfd,
 			     level, optname, optval, optlen);
 
-	if (verbose) printf("...setsockopt returns 0\n");
+	rc = store_faux_sockopt(level, optname, optval, optlen);
+	
+	if (verbose) printf("...setsockopt returns %d\n", rc);
 
-	return 0;
-}*/
+	return rc;
+}
 
 ssize_t recv(int sockfd, void *buf, size_t len, int flags) {
 	char * verbose = getenv("RINA_VERBOSE");

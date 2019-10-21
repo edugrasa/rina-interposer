@@ -59,10 +59,20 @@ void itoa(int value, char* str, int base) {
 	strreverse(str,wstr-1);																						
 }
 
+/* Represents a socket option, capable of storing int values */
+struct faux_sockopt {
+	int level; 
+	int optname;
+	int optval;
+	socklen_t optlen;
+};
+
 KHASH_MAP_INIT_INT(fauxs, struct faux_socket *)
+KHASH_MAP_INIT_INT(sockopts, struct faux_sockopt *);
 struct faux_sockets_store {
 	pthread_mutex_t mutex;
 	khash_t(fauxs) * ht; /* Hash table to store faux sockets */
+	khash_t(sockopts) * hsot; /* Hash table to store socket options */
 	unsigned short next_port; /* Next available port number */
 };
 
@@ -83,9 +93,15 @@ struct faux_sockets_store * get_fs_store() {
 	pthread_mutex_init(&fs_store->mutex, &attributes);
 	pthread_mutexattr_destroy(&attributes);
 
-	/* Initialize hash table */
+	/* Initialize sockets hash table */
 	fs_store->ht = kh_init(fauxs);
 	if (!fs_store->ht) {
+		/* TODO log error */
+	}
+
+	/* Initialize socket options hash table */
+	fs_store->hsot = kh_init(sockopts);
+	if (!fs_store->hsot) {
 		/* TODO log error */
 	}
 
@@ -175,6 +191,103 @@ int _get_faux_socket(int sockfd, struct faux_socket ** fs,
 	return ret;
 }
 
+int _get_faux_sockopt(int optname, struct faux_sockopt ** fso,
+		      struct faux_sockets_store * fss) {
+	khint_t k;
+	int ret;
+
+	/* Get faux sockets opt from hash table */
+	k = kh_get(sockopts, fss->hsot, optname);
+	if (!ret) {
+		/* TODO log error */
+		errno = EINVAL;
+		ret = -1;
+	} else {
+		*fso = kh_value(fss->hsot, k);
+		ret = 0;
+	}
+	
+	return ret;
+}
+
+int store_faux_sockopt(int level, int optname, const void * optval, 
+		       socklen_t len) {
+	struct faux_sockets_store * fss;
+	struct faux_sockopt * fso;
+	khint_t k;
+	int ret;
+	int * val;
+
+	fss = get_fs_store();
+	if (!fss) {
+		/* TODO log error */
+		errno = ENOMEM;
+		return -1;
+	}
+
+	/* Can only store sockopts with values up to int size */
+	if (len > sizeof(int) || !optval) {
+		/* TODO log error */
+		errno = EINVAL;
+		return -1;
+	}
+
+	val = (int *)optval;
+
+	pthread_mutex_lock(&fss->mutex);
+
+	ret = _get_faux_sockopt(optname, &fso, fss);
+	if (ret) {
+		/* Socket option does not exist, create it */
+		fso = calloc(1, sizeof(struct faux_sockopt));
+		if (!fso) {
+			/* TODO log error */
+			errno = ENOMEM;
+			ret = -1;
+		} else {
+			fso->level = level;
+			fso->optname = optname;
+			k = kh_put(sockopts, fss->hsot, optname, &ret);
+			kh_value(fss->hsot, k) = fso;
+			ret = 0;
+		}
+	}
+
+	if (ret == 0) {
+		fso->optval = *val;
+		fso->optlen = len;
+	}
+
+	pthread_mutex_unlock(&fss->mutex);
+
+	return ret;
+}
+
+int get_faux_sockopt_value(int optname, socklen_t * len) {
+	int ret;
+	struct faux_sockopt * fso;
+	struct faux_sockets_store * fss;
+
+	fss = get_fs_store();
+	if (!fss) {
+		/* TODO log error */
+		errno = ENOMEM;
+		ret = -1;
+	}
+
+	pthread_mutex_lock(&fss->mutex);
+
+	ret = _get_faux_sockopt(optname, &fso, fss);
+	if (ret == 0) {
+		ret = fso->optval;
+		*len = fso->optlen;
+	}
+
+	pthread_mutex_unlock(&fss->mutex);
+
+	return ret;
+}
+
 int free_faux_socket(struct faux_socket * fs) {
 	if (!fs) {
 		errno = EINVAL;
@@ -190,27 +303,43 @@ int free_faux_socket(struct faux_socket * fs) {
 }
 
 void app_name_from_sockaddr_in(const struct sockaddr_in * in_addr,
-			      char * app_name) {
-	char buffer[20];
-	
-	itoa(ntohs(in_addr->sin_port), buffer, 10);
-	strcpy(app_name, inet_ntoa(in_addr->sin_addr));
+			       char * app_name) {
+	char port[20];
+	char * address;
+
+	itoa(ntohs(in_addr->sin_port), port, 10);
+	address = inet_ntoa(in_addr->sin_addr);
+
+	/* If address is 'any address' resolve to localhost for now */
+	if (strcmp(address, "0.0.0.0")) {
+		strcpy(app_name, address);
+	} else {
+		strcpy(app_name, "127.0.0.1");
+	}
+
 	strcat(app_name, "||");
-	strcat(app_name, buffer);
-	strcat(app_name, "|");
+	strcat(app_name, port);
+	strcat(app_name, "||");
 }
 
 void app_name_from_sockaddr_in6(const struct sockaddr_in6 * in_addr,
 				char * app_name) {
-	char buffer[20];
-	char abuffer[INET6_ADDRSTRLEN];
-		
-	itoa(ntohs(in_addr->sin6_port), buffer, 10);
-	inet_ntop(AF_INET6, in_addr, abuffer, INET6_ADDRSTRLEN);
-	strcpy(app_name, abuffer);
+	char port[20];
+	char address[INET6_ADDRSTRLEN];
+
+	itoa(ntohs(in_addr->sin6_port), port, 10);
+	inet_ntop(AF_INET6, &(in_addr->sin6_addr), address, INET6_ADDRSTRLEN);
+
+	/* If address is 'any address' resolve to localhost for now */
+	if (strcmp(address, "::")) {
+		strcpy(app_name, address);
+	} else {
+		strcpy(app_name, "::1");
+	}
+
 	strcat(app_name, "||");
-	strcat(app_name, buffer);
-	strcat(app_name, "|");
+	strcat(app_name, port);
+	strcat(app_name, "||");
 }
 
 void init_ipv4_addr(struct sockaddr_in * to, struct sockaddr_in * from) {
@@ -334,6 +463,7 @@ int bind_faux_socket(int sockfd, const struct sockaddr * addr,
 int get_app_name_from_ipv4_addr(const struct sockaddr* addr,
 			   	socklen_t addrlen, char * app_name) {
 	struct sockaddr_in * in_addr;
+	int rc;
 
 	if (addrlen != sizeof(struct sockaddr_in)) {
 		/* TODO log error */
@@ -360,7 +490,7 @@ int get_app_name_from_ipv6_addr(const struct sockaddr* addr,
 
 	in_addr = (struct sockaddr_in6 *)addr;
 
-	app_name_from_sockaddr_in6(in_addr, app_name);
+        app_name_from_sockaddr_in6(in_addr, app_name);
 
 	return 0;
 }
@@ -463,7 +593,7 @@ int set_socket_peerv6(struct faux_socket * fs, const struct sockaddr * addr,
 
 	/* Create local application name */
 	app_name_from_sockaddr_in6(in_fs_addr, fs->peer_app_name);
-
+	
 	return 0;
 }
 
@@ -504,7 +634,7 @@ int set_faux_socket_peer(int sockfd, const struct sockaddr * addr,
 }
 
 int get_ipv4_sockname(struct faux_socket * fs, struct sockaddr * addr, 
-		      socklen_t * addrlen) {
+		      socklen_t * addrlen, int peer) {
 	struct sockaddr_in * in_addr;
 	struct sockaddr_in * in_fs_addr;
 
@@ -522,19 +652,23 @@ int get_ipv4_sockname(struct faux_socket * fs, struct sockaddr * addr,
 	*addrlen = sizeof(struct sockaddr_in);
 
 	/* The socket is not bound to any address */
-	if (!fs->bind_addr) {
+	if ((!peer && !fs->bind_addr) || (peer && !fs->peer_addr)) {
 		return 0;
 	}
 
-	in_fs_addr = (struct sockaddr_in *)fs->bind_addr;
-	in_addr->sin_port = in_fs_addr->sin_port;
-	in_addr->sin_addr.s_addr = in_fs_addr->sin_addr.s_addr;
+	if (peer) {
+		in_fs_addr = (struct sockaddr_in *)fs->peer_addr;
+	} else {
+		in_fs_addr = (struct sockaddr_in *)fs->bind_addr;
+	}
+
+	init_ipv4_addr(in_addr, in_fs_addr);
 
 	return 0;
 }
 
 int get_ipv6_sockname(struct faux_socket * fs, struct sockaddr * addr,
-		      socklen_t * addrlen) {
+		      socklen_t * addrlen, int peer) {
 	struct sockaddr_in6 * in_addr;
 	struct sockaddr_in6 * in_fs_addr;
 
@@ -553,21 +687,23 @@ int get_ipv6_sockname(struct faux_socket * fs, struct sockaddr * addr,
 	*addrlen = sizeof(struct sockaddr_in6);
 
 	/* The socket is not bound to any address */
-	if (!fs->bind_addr) {
+	if ((!peer && !fs->bind_addr) || (peer && !fs->peer_addr)) {
 		return 0;
 	}
 
-	in_fs_addr = (struct sockaddr_in6 *)fs->bind_addr;
-	in_addr->sin6_port = in_fs_addr->sin6_port;
-	in_addr->sin6_flowinfo = in_fs_addr->sin6_flowinfo;
-	in_addr->sin6_scope_id = in_fs_addr->sin6_scope_id;
-	memcpy(in_addr->sin6_addr.s6_addr, in_fs_addr->sin6_addr.s6_addr, 16);
+	if (peer) {
+		in_fs_addr = (struct sockaddr_in6 *)fs->peer_addr;
+	} else {
+		in_fs_addr = (struct sockaddr_in6 *)fs->bind_addr;
+	}
+	
+	init_ipv6_addr(in_addr, in_fs_addr);
 
 	return 0;
 }
 
-int get_faux_sockname(int sockfd, struct sockaddr* addr, 
-		      socklen_t * addrlen) {
+int get_faux_sock_or_peer_name(int sockfd, struct sockaddr* addr, 
+		      	       socklen_t * addrlen, int peer) {
 	struct faux_sockets_store * fss;
 	struct faux_socket * fs;
 	int ret;
@@ -585,10 +721,12 @@ int get_faux_sockname(int sockfd, struct sockaddr* addr,
 	if (ret == 0 && fs->bind_addr) {
 		switch(fs->domain) {
 			case AF_INET:
-				ret = get_ipv4_sockname(fs, addr, addrlen);
+				ret = get_ipv4_sockname(fs, addr, addrlen, 
+							peer);
 				break;
 			case AF_INET6:
-				ret = get_ipv6_sockname(fs, addr, addrlen);
+				ret = get_ipv6_sockname(fs, addr, addrlen,
+							peer);
 				break;
 			default:
 				/* TODO log error */
@@ -601,6 +739,16 @@ int get_faux_sockname(int sockfd, struct sockaddr* addr,
 	pthread_mutex_unlock(&fss->mutex);
 
 	return ret;
+}
+
+int get_faux_sockname(int sockfd, struct sockaddr * addr,
+		      socklen_t * addrlen) {
+	return get_faux_sock_or_peer_name(sockfd, addr, addrlen, 0);
+}
+
+int get_faux_peername(int sockfd, struct sockaddr * addr,
+		      socklen_t * addrlen) {
+	return get_faux_sock_or_peer_name(sockfd, addr, addrlen, 1);
 }
 
 int get_faux_socket_data(int sockfd, struct faux_socket * fs) {
