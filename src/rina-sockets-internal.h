@@ -87,6 +87,10 @@ int store_faux_sockopt(int level, int optname, const void * optval,
 /* Retrieve the value of a faux socket sockopt */
 int get_faux_sockopt_value(int optname, socklen_t * len);
 
+/* Resolve a node and port to an IPv4 or IPv6 address */
+int resolve_address(struct sockaddr ** addr, socklen_t * addrlen, int family, 
+		    const char * node, int port, int ai_passive);
+
 /* ANSI C version of itoa, since it is not standard */
 void itoa(int value, char* str, int base);
 

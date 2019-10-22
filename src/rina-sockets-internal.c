@@ -878,3 +878,82 @@ int close_faux_socket(int sockfd) {
 
 	return ret;
 }
+
+int resolve_ipv4_addr(struct sockaddr ** addr, socklen_t * addrlen, 
+		      const char * node, int port, int ai_passive) {
+	struct sockaddr_in * in_addr;
+
+	*addr = calloc(1, sizeof(struct sockaddr_in));
+	if (!*addr) {
+		errno = ENOMEM;
+		return -1;
+	}
+
+	*addrlen = sizeof(struct sockaddr_in);
+
+	in_addr = (struct sockaddr_in*) *addr;
+	in_addr->sin_family = AF_INET;
+	in_addr->sin_port = htons(port);
+
+	if (ai_passive && !node) {
+		in_addr->sin_addr.s_addr = htonl(INADDR_ANY);
+	} else if (!node) {
+		in_addr->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	} else {
+		inet_aton(node, &in_addr->sin_addr);
+	}
+
+	return 0;
+}
+
+int resolve_ipv6_addr(struct sockaddr ** addr, socklen_t * addrlen,
+		      const char * node, int port, int ai_passive) {
+	struct sockaddr_in6 * in_addr;
+	const struct in6_addr in6addr_any = IN6ADDR_ANY_INIT;
+	const struct in6_addr in6addr_lb = IN6ADDR_LOOPBACK_INIT;
+
+	*addr = calloc(1, sizeof(struct sockaddr_in6));
+	if (!*addr) {
+		errno = ENOMEM;
+		return -1;
+	}
+
+	*addrlen = sizeof(struct sockaddr_in6);
+
+	in_addr = (struct sockaddr_in6*) *addr;
+	in_addr->sin6_family = AF_INET6;
+	in_addr->sin6_port = htons(port);
+	in_addr->sin6_flowinfo = 0;
+	in_addr->sin6_scope_id = 0;
+
+	if (ai_passive && !node) {
+		in_addr->sin6_addr = in6addr_any;
+	} else if (!node) {
+		in_addr->sin6_addr = in6addr_lb;
+	} else {
+		inet_pton(AF_INET6, node, &(in_addr->sin6_addr));
+	}
+
+	return 0;
+}
+
+int resolve_address(struct sockaddr ** addr, socklen_t * addrlen, int family, 
+		    const char * node, int port, int ai_passive) {
+	int rc;
+	
+	switch(family) {
+		case AF_INET:
+			rc = resolve_ipv4_addr(addr, addrlen, node, port, 
+					       ai_passive);
+			break;
+		case AF_INET6:
+			rc = resolve_ipv6_addr(addr, addrlen, node, port,
+					       ai_passive);
+			break;
+		default:
+			errno = EINVAL;
+			rc = -1;
+	}
+
+	return rc;
+}

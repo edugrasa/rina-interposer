@@ -300,7 +300,7 @@ int accept4(int sockfd, struct sockaddr *addr,
 }
 
 
-/*int getaddrinfo(const char *node, const char *service, 
+int getaddrinfo(const char *node, const char *service, 
 		const struct addrinfo *hints, struct addrinfo **res) {
   	char * verbose = getenv("RINA_VERBOSE");
 	int rc = 0;
@@ -319,58 +319,36 @@ int accept4(int sockfd, struct sockaddr *addr,
 	}
 
 	memset(*res, 0, sizeof(struct addrinfo));
-	(*res)->ai_family = AF_INET;
+	(*res)->ai_family = AF_INET6;
+	(*res)->ai_socktype = SOCK_STREAM;
 	(*res)->ai_next = NULL;
 	(*res)->ai_canonname = NULL;
 	if (hints) {
+		if (hints->ai_family == AF_INET) 
+			(*res)->ai_family = AF_INET;
+		if (hints->ai_socktype) 
+			(*res)->ai_socktype = hints->ai_socktype;
 		(*res)->ai_flags = hints->ai_flags;
-		(*res)->ai_socktype = hints->ai_socktype;
 		(*res)->ai_protocol = hints->ai_protocol;
 		if (hints->ai_flags & AI_PASSIVE) ai_passive = 1;
 	}
 	
-	(*res)->ai_addr = calloc(1, sizeof(struct sockaddr_in));
-	if ((*res)->ai_addr == NULL) {
-		errno = ENOMEM;
-		perror("   Problems allocating sockaddr_in struct");
-		free(*res);
-		return EAI_MEMORY;
-	}
-	
-	/* Resolve to an IPv4 address */
-/*	(*res)->ai_addrlen = sizeof(struct sockaddr_in);
-	addr_in = (struct sockaddr_in *)(*res)->ai_addr;
-	addr_in->sin_family = AF_INET;
-
 	if (service) {
 		port = atoi(service);
-		if (port > 0) { 
-			addr_in->sin_port = htons(port);
-		} else {
+		if (port <= 0) {
 			errno = EINVAL;
 			perror("   Problems converting service to int");
-			free(*res);
 			return EAI_SERVICE;
 		}
 	}
 
-	if (verbose) printf("   Resolved sin_port %d\n", addr_in->sin_port);
-
-	if (ai_passive && !node) {
-		addr_in->sin_addr.s_addr = htonl(INADDR_ANY);
-	} else if (!node) {
-		addr_in->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-	} else {
-		inet_aton(node, &addr_in->sin_addr);
-	}
-
-	if (verbose) printf("   Resolved IPv4 address %d\n", 
-			    addr_in->sin_addr.s_addr);
-  
-	if (verbose) printf("...getaddrinfo returns 0\n");
+	rc = resolve_address(&(*res)->ai_addr, &(*res)->ai_addrlen, 
+			     (*res)->ai_family, node, port, ai_passive);
+	
+	if (verbose) printf("...getaddrinfo returns %d\n", rc);
   	
-	return 0;
-}*/
+	return rc;
+}
 
 int getsockname(int sockfd, struct sockaddr *addr, socklen_t *addrlen) {
 	char * verbose = getenv("RINA_VERBOSE");
